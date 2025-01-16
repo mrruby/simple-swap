@@ -12,6 +12,12 @@
 		"preview": "vite preview"
 	},
 	"dependencies": {
+		"@ston-fi/api": "^0.16.0",
+		"@ston-fi/sdk": "^2.2.1",
+		"@ton/core": "^0.59.1",
+		"@ton/crypto": "^3.3.0",
+		"@ton/ton": "^15.1.0",
+		"@tonconnect/ui-react": "^2.0.11",
 		"react": "^18.3.1",
 		"react-dom": "^18.3.1"
 	},
@@ -20,8 +26,12 @@
 		"@types/react": "^18.3.18",
 		"@types/react-dom": "^18.3.5",
 		"@vitejs/plugin-react": "^4.3.4",
+		"autoprefixer": "^10.4.20",
 		"globals": "^15.14.0",
-		"typescript": "~5.6.2",
-		"vite": "^6.0.5"
+		"postcss": "^8.5.1",
+		"tailwindcss": "^3.4.17",
+		"typescript": "~5.7.3",
+		"vite": "^6.0.7",
+		"vite-plugin-node-polyfills": "^0.22.0"
 	}
 }
