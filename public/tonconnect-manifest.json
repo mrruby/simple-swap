@@ -1,7 +1,5 @@
 {
-	"url": "https://simple-swap.ston.fi",
+	"url": "https://ston-fi-simple-swap.netlify.app/",
 	"name": "Simple Swap",
-	"iconUrl": "https://simple-swap.ston.fi/ton-connect-icon.png",
-	"termsOfUseUrl": "https://simple-swap.ston.fi/terms",
-	"privacyPolicyUrl": "https://simple-swap.ston.fi/privacy"
+	"iconUrl": "https://ston-fi-simple-swap.netlify.app/ston.png"
 }

@@ -18,7 +18,6 @@ export const SwapInput = ({
 	onAssetChange,
 	onAmountChange,
 }: SwapInputProps) => {
-	console.log(selectedAsset);
 	const formattedBalance = selectedAsset
 		? formatBalance(selectedAsset.balance, selectedAsset.meta?.decimals)
 		: "0";
