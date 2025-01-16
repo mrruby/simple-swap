@@ -119,7 +119,7 @@ export const Swap = () => {
 
 		updateState({ loadingTx: true });
 
-		try {  
+		try {
 			const messages = await buildSwapTransaction(
 				simulationResult,
 				walletAddress,
