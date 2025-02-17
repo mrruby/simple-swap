@@ -30,7 +30,7 @@ export const SwapInput = ({
 
 			<div className="flex gap-4">
 				<select
-					className="flex-1 p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-base font-medium text-gray-900"
+					className="flex-1 p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-hidden transition-all text-base font-medium text-gray-900"
 					value={selectedAsset?.contractAddress || ""}
 					onChange={(e) => {
 						const asset = assets.find(
@@ -55,7 +55,7 @@ export const SwapInput = ({
 
 				<input
 					type="text"
-					className="flex-1 p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all disabled:bg-gray-100 disabled:cursor-not-allowed text-base font-medium text-gray-900 placeholder-gray-400"
+					className="flex-1 p-3 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-hidden transition-all disabled:bg-gray-100 disabled:cursor-not-allowed text-base font-medium text-gray-900 placeholder-gray-400"
 					placeholder="0.0"
 					value={amount}
 					onChange={(e) => onAmountChange(e.target.value)}
