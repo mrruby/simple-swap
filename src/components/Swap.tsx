@@ -1,6 +1,9 @@
 import type { AssetInfoV2, SwapSimulation } from "@ston-fi/api";
 import { useTonAddress, useTonConnectUI } from "@tonconnect/ui-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { ITransactionDetails } from "../hooks/useSwapStatusQuery";
+import { useSwapStatusNotifications } from "../hooks/useSwapStatusNotifications";
 import { buildSwapTransaction, fetchAssets, simulateSwap } from "../lib/swap";
 import { formatAmount } from "../lib/utils";
 import { SwapForm } from "./SwapForm";
@@ -34,6 +37,12 @@ export const Swap = () => {
 	const walletAddress = useTonAddress();
 	const [tonConnectUI] = useTonConnectUI();
 	const [state, setState] = useState<SwapState>(initialState);
+
+	// Store transaction details locally
+	const [transactionDetails, setTransactionDetails] = useState<ITransactionDetails | undefined>(undefined);
+
+	// Pass transaction details into the status notifications hook
+	useSwapStatusNotifications(transactionDetails);
 
 	const updateState = (updates: Partial<SwapState>) => {
 		setState((current) => ({ ...current, ...updates }));
@@ -120,17 +129,25 @@ export const Swap = () => {
 		updateState({ loadingTx: true });
 
 		try {
-			const messages = await buildSwapTransaction(
-				simulationResult,
-				walletAddress,
-				{
-					queryId: Date.now(),
-				},
-			);
+			const queryId = Date.now();
+			const messages = await buildSwapTransaction(simulationResult, walletAddress, {
+				queryId,
+			});
 
 			await tonConnectUI.sendTransaction({
 				validUntil: Date.now() + 1000 * 60,
 				messages,
+			});
+
+			// Store transaction details locally for status tracking
+			setTransactionDetails({
+				queryId,
+				routerAddress: simulationResult.routerAddress,
+				ownerAddress: walletAddress,
+			});
+
+			toast.info("Transaction Sent", {
+				description: "Your swap transaction has been sent to the network",
 			});
 
 			updateState({
@@ -140,6 +157,9 @@ export const Swap = () => {
 			});
 		} catch (error) {
 			console.error("Swap transaction error", error);
+			toast.error("Transaction Failed", {
+				description: "Failed to send your swap transaction. Please try again.",
+			});
 		} finally {
 			updateState({ loadingTx: false });
 		}
