@@ -2,8 +2,8 @@ import type { AssetInfoV2, SwapSimulation } from "@ston-fi/api";
 import { useTonAddress, useTonConnectUI } from "@tonconnect/ui-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ITransactionDetails } from "../hooks/useSwapStatusQuery";
 import { useSwapStatusNotifications } from "../hooks/useSwapStatusNotifications";
+import { ITransactionDetails } from "../hooks/useSwapStatusQuery";
 import { buildSwapTransaction, fetchAssets, simulateSwap } from "../lib/swap";
 import { formatAmount } from "../lib/utils";
 import { SwapForm } from "./SwapForm";
@@ -39,7 +39,9 @@ export const Swap = () => {
 	const [state, setState] = useState<SwapState>(initialState);
 
 	// Store transaction details locally
-	const [transactionDetails, setTransactionDetails] = useState<ITransactionDetails | undefined>(undefined);
+	const [transactionDetails, setTransactionDetails] = useState<
+		ITransactionDetails | undefined
+	>(undefined);
 
 	// Pass transaction details into the status notifications hook
 	useSwapStatusNotifications(transactionDetails);
@@ -62,20 +64,22 @@ export const Swap = () => {
 		loadAssets();
 	}, [walletAddress]);
 
+	// Reset state when wallet is disconnected
 	useEffect(() => {
+		if (!walletAddress) {
+			setState(initialState);
+			setTransactionDetails(undefined);
+		}
+	}, [walletAddress]);
+
+	useEffect(() => {
+		// Local flag to prevent setting state after unmount or if user disconnects mid-simulation
+		let isCancelled = false;
+
 		const runSimulation = async () => {
 			const { offerAsset, askAsset, offerAmount, askAmount } = state;
 
-			if (!offerAsset || !askAsset || (!offerAmount && !askAmount)) {
-				updateState({ simulationResult: null, simulationError: "" });
-				return;
-			}
-
-			updateState({
-				loadingSimulation: true,
-				simulationError: "",
-				simulationResult: null,
-			});
+			if (!offerAsset || !askAsset) return;
 
 			try {
 				const result = await simulateSwap({
@@ -88,32 +92,61 @@ export const Swap = () => {
 					decimalsAsk: askAsset.meta?.decimals ?? 9,
 				});
 
-				updateState({
-					simulationResult: result,
-					...(offerAmount
-						? {
-								askAmount: formatAmount(
-									result.minAskUnits,
-									askAsset.meta?.decimals,
-								),
-							}
-						: {
-								offerAmount: formatAmount(
-									result.offerUnits,
-									offerAsset.meta?.decimals,
-								),
-							}),
-				});
+				if (!isCancelled) {
+					updateState({
+						simulationResult: result,
+						// If user typed the offer amount, set ask from simulation; otherwise set offer from simulation
+						...(offerAmount
+							? {
+									askAmount: formatAmount(
+										result.minAskUnits,
+										askAsset.meta?.decimals,
+									),
+								}
+							: {
+									offerAmount: formatAmount(
+										result.offerUnits,
+										offerAsset.meta?.decimals,
+									),
+								}),
+					});
+				}
 			} catch (err) {
-				updateState({
-					simulationError: (err as Error)?.message || "Simulation failed",
-				});
+				if (!isCancelled) {
+					updateState({
+						simulationError: (err as Error)?.message || "Simulation failed",
+					});
+				}
 			} finally {
-				updateState({ loadingSimulation: false });
+				if (!isCancelled) {
+					updateState({ loadingSimulation: false });
+				}
 			}
 		};
 
+		// If not connected or not enough data to simulate, reset the simulation and return
+		const { offerAsset, askAsset, offerAmount, askAmount } = state;
+		if (
+			!walletAddress ||
+			!offerAsset ||
+			!askAsset ||
+			(!offerAmount && !askAmount)
+		) {
+			updateState({ simulationResult: null, simulationError: "" });
+			return;
+		}
+
+		// Otherwise, start simulation
+		updateState({
+			loadingSimulation: true,
+			simulationError: "",
+			simulationResult: null,
+		});
 		runSimulation();
+
+		return () => {
+			isCancelled = true;
+		};
 	}, [
 		state.offerAsset,
 		state.askAsset,
@@ -130,9 +163,13 @@ export const Swap = () => {
 
 		try {
 			const queryId = Date.now();
-			const messages = await buildSwapTransaction(simulationResult, walletAddress, {
-				queryId,
-			});
+			const messages = await buildSwapTransaction(
+				simulationResult,
+				walletAddress,
+				{
+					queryId,
+				},
+			);
 
 			await tonConnectUI.sendTransaction({
 				validUntil: Date.now() + 1000 * 60,
