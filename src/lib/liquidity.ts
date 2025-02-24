@@ -15,64 +15,80 @@ export type SimulateLiquidityProvisionParams = {
 
 /**
  * Simulate liquidity provision.
+ * Uses early returns to reduce nesting.
  */
 export async function simulateLiquidityProvision(
 	params: SimulateLiquidityProvisionParams,
 ) {
+	const {
+		provisionType,
+		walletAddress,
+		tokenA,
+		tokenB,
+		tokenAUnits,
+		tokenBUnits,
+		poolAddress,
+		slippageTolerance = "0.001",
+	} = params;
+
+	// Common base parameters
 	const baseParams = {
-		tokenA: params.tokenA,
-		tokenB: params.tokenB,
-		slippageTolerance: params.slippageTolerance ?? "0.001",
-		...(params.walletAddress && { walletAddress: params.walletAddress }),
+		tokenA,
+		tokenB,
+		slippageTolerance,
+		...(walletAddress && { walletAddress }),
 	};
 
-	switch (params.provisionType) {
-		case "Initial":
-			if (!params.tokenAUnits || !params.tokenBUnits) {
-				throw new Error("Initial provision requires both token amounts");
-			}
-			return stonApiClient.simulateLiquidityProvision({
-				...baseParams,
-				provisionType: "Initial",
-				tokenAUnits: params.tokenAUnits,
-				tokenBUnits: params.tokenBUnits,
-			});
-
-		case "Balanced":
-			if (!params.poolAddress) {
-				throw new Error("Balanced provision requires pool address");
-			}
-			if (!params.tokenAUnits && !params.tokenBUnits) {
-				throw new Error(
-					"Balanced provision requires at least one token amount",
-				);
-			}
-			// If both token amounts are provided, choose tokenAUnits by default
-			const selectedUnits = params.tokenAUnits
-				? { tokenAUnits: params.tokenAUnits }
-				: { tokenBUnits: params.tokenBUnits! };
-			return stonApiClient.simulateLiquidityProvision({
-				...baseParams,
-				provisionType: "Balanced",
-				poolAddress: params.poolAddress,
-				...selectedUnits,
-			});
-
-		case "Arbitrary":
-			if (!params.poolAddress || !params.tokenAUnits || !params.tokenBUnits) {
-				throw new Error(
-					"Arbitrary provision requires pool address and both token amounts",
-				);
-			}
-			return stonApiClient.simulateLiquidityProvision({
-				...baseParams,
-				provisionType: "Arbitrary",
-				poolAddress: params.poolAddress,
-				tokenAUnits: params.tokenAUnits,
-				tokenBUnits: params.tokenBUnits,
-			});
-
-		default:
-			throw new Error(`Unknown provision type: ${params.provisionType}`);
+	// 1) Initial
+	if (provisionType === "Initial") {
+		if (!tokenAUnits || !tokenBUnits) {
+			throw new Error("Initial provision requires both token amounts.");
+		}
+		return stonApiClient.simulateLiquidityProvision({
+			...baseParams,
+			provisionType: "Initial",
+			tokenAUnits,
+			tokenBUnits,
+		});
 	}
+
+	// 2) Balanced
+	if (provisionType === "Balanced") {
+		if (!poolAddress) {
+			throw new Error("Balanced provision requires pool address.");
+		}
+		if (!tokenAUnits && !tokenBUnits) {
+			throw new Error("Balanced provision requires at least one token amount.");
+		}
+		// Balanced can take either A or B units, not both
+		const selectedUnits = tokenAUnits
+			? { tokenAUnits }
+			: { tokenBUnits: tokenBUnits! };
+
+		return stonApiClient.simulateLiquidityProvision({
+			...baseParams,
+			provisionType: "Balanced",
+			poolAddress,
+			...selectedUnits,
+		});
+	}
+
+	// 3) Arbitrary
+	if (provisionType === "Arbitrary") {
+		if (!poolAddress || !tokenAUnits || !tokenBUnits) {
+			throw new Error(
+				"Arbitrary provision requires pool address and both token amounts.",
+			);
+		}
+		return stonApiClient.simulateLiquidityProvision({
+			...baseParams,
+			provisionType: "Arbitrary",
+			poolAddress,
+			tokenAUnits,
+			tokenBUnits,
+		});
+	}
+
+	// Unknown
+	throw new Error(`Unknown provision type: ${provisionType}`);
 }

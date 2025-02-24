@@ -17,21 +17,23 @@ import {
 } from "./useSimulateLiquidity";
 
 /**
- * Utility to parse amounts as BN for token or TON.
+ * Type guard for errors with optional 'data' property
  */
-function parseAmountForToken(token: AssetInfoV2, amount: string) {
-	if (token.kind === "Ton") {
-		return toNano(amount);
-	}
-	const decimals = token.meta?.decimals ?? 9;
-	return floatToBigNumber(amount, decimals);
-}
+const isApiError = (error: unknown): error is { data?: string } => 
+	typeof error === "object" && error !== null && "data" in error;
 
 /**
- * Builds the transaction parameters for depositing a single side
- * (either TON or a Jetton) in a two-sided deposit operation.
+ * Parse amount for token or TON with appropriate decimals
  */
-async function buildTwoSideDepositTx(
+const parseAmountForToken = (token: AssetInfoV2, amount: string): bigint => 
+	token.kind === "Ton"
+		? toNano(amount)
+		: floatToBigNumber(amount, token.meta?.decimals ?? 9);
+
+/**
+ * Build transaction parameters for a single side deposit
+ */
+const buildTwoSideDepositTx = async (
 	routerContract: InstanceType<typeof DEX.v2_2.Router>,
 	isTonSide: boolean,
 	sideToken: AssetInfoV2,
@@ -40,11 +42,11 @@ async function buildTwoSideDepositTx(
 	proxyTon: InstanceType<typeof pTON.v2_1>,
 	queryId: number,
 	walletAddress: string,
-) {
+) => {
 	const sendAmount = parseAmountForToken(sideToken, sideAmount);
 
 	if (isTonSide) {
-		return await routerContract.getProvideLiquidityTonTxParams(
+		return routerContract.getProvideLiquidityTonTxParams(
 			tonApiClient.provider(routerContract.address),
 			{
 				userWalletAddress: walletAddress,
@@ -57,105 +59,95 @@ async function buildTwoSideDepositTx(
 		);
 	}
 
-	const isOtherTon = otherToken.kind === "Ton";
-	const otherTokenAddr = isOtherTon
+	const otherIsTon = otherToken.kind === "Ton";
+	const otherAddress = otherIsTon
 		? proxyTon.address.toString()
 		: otherToken.contractAddress;
 
-	return await routerContract.getProvideLiquidityJettonTxParams(
+	return routerContract.getProvideLiquidityJettonTxParams(
 		tonApiClient.provider(routerContract.address),
 		{
 			userWalletAddress: walletAddress,
 			sendTokenAddress: sideToken.contractAddress,
 			sendAmount: sendAmount.toString(),
-			otherTokenAddress: otherTokenAddr,
+			otherTokenAddress: otherAddress,
 			minLpOut: "1",
 			queryId,
 		},
 	);
-}
+};
 
 /**
- * Validate whether the user has provided enough input to proceed with a deposit transaction.
+ * Validate liquidity provision inputs
  */
-function validateProvide(
+const validateProvide = (
 	tokenA: AssetInfoV2 | null,
 	tokenB: AssetInfoV2 | null,
 	amountA: string,
 	amountB: string,
 	provisionType: LiquidityProvisionType,
 	isWalletConnected: boolean,
-): string | null {
+): string | null => {
 	if (!tokenA || !tokenB) {
-		return "Please select both tokens (token A and token B).";
+		return "Please select both tokens (A and B).";
 	}
 	if (!isWalletConnected) {
 		return "Please connect your wallet.";
 	}
+
+	const hasA = !!amountA;
+	const hasB = !!amountB;
+
 	// Balanced requires at least one side
-	if (provisionType === "Balanced") {
-		if (!amountA && !amountB) {
-			return "For 'Balanced' provisioning, enter at least one token amount.";
-		}
-	} else {
-		// "Initial" and "Arbitrary" require both sides
-		if (!amountA || !amountB) {
-			return "For 'Initial' or 'Arbitrary' provisioning, please enter both token amounts.";
-		}
+	if (provisionType === "Balanced" && !hasA && !hasB) {
+		return "For 'Balanced' provisioning, enter at least one token amount.";
+	}
+
+	// "Initial" or "Arbitrary" require both sides
+	if ((provisionType === "Initial" || provisionType === "Arbitrary") && (!hasA || !hasB)) {
+		return `For '${provisionType}' provisioning, please enter both token amounts.`;
 	}
 	return null;
-}
+};
 
 /**
- * Hook to retrieve a router that is v2.2 with poolCreationEnabled, in a declarative style.
+ * Hook to retrieve a suitable router (v2.2 with poolCreationEnabled)
  */
-function useSuitableRouter() {
-	return useQuery<RouterInfo[], Error, RouterInfo | undefined>({
+const useSuitableRouter = () => 
+	useQuery<RouterInfo[], Error, RouterInfo | undefined>({
 		queryKey: ["availableRouters"],
 		queryFn: () => stonApiClient.getRouters(),
 		select: (routers) =>
 			routers.find(
-				(router) =>
-					router.majorVersion === 2 &&
-					router.minorVersion === 2 &&
-					router.poolCreationEnabled,
+				(r) => r.majorVersion === 2 && r.minorVersion === 2 && r.poolCreationEnabled,
 			),
 	});
-}
 
 /**
- * Type guard for errors with a data property
+ * Form data type for liquidity provision
  */
-function isFetchError(error: unknown): error is { data?: string } {
-	return typeof error === "object" && error !== null && "data" in error;
-}
+type LiquidityFormData = {
+	tokenA: AssetInfoV2 | null;
+	tokenB: AssetInfoV2 | null;
+	amountA: string;
+	amountB: string;
+	firstChangedSide: "A" | "B" | null;
+	activeSide: "A" | "B" | null;
+	provisionType: LiquidityProvisionType;
+	poolAddress?: string;
+	provisionHistory: LiquidityProvisionType[];
+};
 
 /**
- * This hook provides two-sided liquidity-providing functionality
- * plus simulation (like how we do with swap).
+ * Hook for providing liquidity with simulation support
  */
 export const useProvideLiquidity = () => {
 	const walletAddress = useTonAddress();
 	const [tonConnectUI] = useTonConnectUI();
 	const isWalletConnected = Boolean(walletAddress);
 
-	// Single state object for user input
-	const [formData, setFormData] = useState<{
-		tokenA: AssetInfoV2 | null;
-		tokenB: AssetInfoV2 | null;
-		amountA: string;
-		amountB: string;
-		firstChangedSide: "A" | "B" | null;
-		activeSide: "A" | "B" | null;
-		provisionType: LiquidityProvisionType;
-		poolAddress?: string;
-		/**
-		 * Track the history of provision types we've used so far.
-		 * We'll rely on this to detect the "first Balanced" scenario
-		 * without a raw boolean.
-		 */
-		provisionHistory: LiquidityProvisionType[];
-	}>({
+	// Form state
+	const [formData, setFormData] = useState<LiquidityFormData>({
 		tokenA: null,
 		tokenB: null,
 		amountA: "",
@@ -167,34 +159,30 @@ export const useProvideLiquidity = () => {
 		provisionHistory: [],
 	});
 
-	// Local states for result or errors
+	// UI state
 	const [error, setError] = useState("");
 	const [loadingTx, setLoadingTx] = useState(false);
-
-	// Assets: fetched once user is connected
 	const [allAssets, setAllAssets] = useState<AssetInfoV2[]>([]);
 
+	// Load assets when wallet connects
 	useEffect(() => {
 		if (!isWalletConnected) {
 			setAllAssets([]);
 			return;
 		}
 		fetchAssets(walletAddress)
-			.then((assets) => setAllAssets(assets))
-			.catch((err) => console.error(err));
+			.then(setAllAssets)
+			.catch(console.error);
 	}, [isWalletConnected, walletAddress]);
 
-	// Query the matched router
+	// Get router
 	const {
 		data: matchedRouter,
 		isLoading: isRoutersLoading,
 		error: routersError,
 	} = useSuitableRouter();
 
-	/**
-	 * A separate hook to run the simulation in a declarative manner.
-	 * We'll parse the decimals from each token for the simulation.
-	 */
+	// Run simulation
 	const decimalsA = formData.tokenA?.meta?.decimals ?? 9;
 	const decimalsB = formData.tokenB?.meta?.decimals ?? 9;
 
@@ -215,14 +203,10 @@ export const useProvideLiquidity = () => {
 		activeSide: formData.activeSide,
 	});
 
-	/**
-	 * Once we get the simulation result for Balanced, auto-update the other side
-	 * using getUpdatedBalancedAmounts. If "Initial" or "Arbitrary," do not override.
-	 */
+	// Auto-update other side for Balanced mode
 	useEffect(() => {
-		if (!lpSimulation) {
-			return;
-		}
+		if (!lpSimulation) return;
+
 		const { amountA, amountB } = getUpdatedBalancedAmounts(
 			formData.provisionType,
 			formData.activeSide,
@@ -232,108 +216,73 @@ export const useProvideLiquidity = () => {
 			decimalsB,
 			lpSimulation,
 		);
+
 		if (amountA !== formData.amountA || amountB !== formData.amountB) {
-			setFormData((prev) => ({
-				...prev,
-				amountA,
-				amountB,
-			}));
+			setFormData((prev) => ({ ...prev, amountA, amountB }));
 		}
 	}, [
 		lpSimulation,
-		formData.provisionType,
-		formData.activeSide,
 		formData.amountA,
 		formData.amountB,
+		formData.provisionType,
+		formData.activeSide,
 		decimalsA,
 		decimalsB,
 	]);
 
-	/**
-	 * If simulation is "Initial" but returns 400 "already exists", we switch to "Balanced".
-	 * We keep the first input side only. Then we store the discovered pool address.
-	 */
+	// Handle "already exists" error for Initial mode
 	useEffect(() => {
-		if (!simulationError) return;
+		if (!simulationError || formData.provisionType !== "Initial") return;
+		if (!isApiError(simulationError)) return;
 
-		if (isFetchError(simulationError)) {
-			const errorMessage = simulationError.data;
-			if (typeof errorMessage === "string") {
-				const match = errorMessage.match(/already exists:\s*(\S+)/);
-				if (match && match[1]) {
-					// Pool already exists => switch to Balanced
-					setFormData((prev) => {
-						let nextHistory = prev.provisionHistory;
-						if (!nextHistory.includes("Balanced")) {
-							nextHistory = [...nextHistory, "Balanced"];
-						}
+		const errorMsg = simulationError.data;
+		if (typeof errorMsg !== "string") return;
 
-						// If user typed both sides in "Initial", we want to rely on firstChangedSide
-						// as the active side. If firstChangedSide is still null for some reason,
-						// we fallback to "A" or "B" depending on whichever side has a non-empty value.
-						let nextActiveSide = prev.firstChangedSide;
-						if (!nextActiveSide) {
-							// fallback logic if firstChangedSide is null
-							if (prev.amountA) {
-								nextActiveSide = "A";
-							} else if (prev.amountB) {
-								nextActiveSide = "B";
-							}
-						}
+		const match = errorMsg.match(/already exists:\s*(\S+)/);
+		if (!match?.[1]) return;
 
-						return {
-							...prev,
-							provisionType: "Balanced",
-							poolAddress: match[1],
-							provisionHistory: nextHistory,
-							activeSide: nextActiveSide,
-						};
-					});
-				}
-			}
-		}
-	}, [simulationError]);
+		setFormData((prev) => {
+			const newHistory = prev.provisionHistory.includes("Balanced")
+				? prev.provisionHistory
+				: [...prev.provisionHistory, "Balanced" as LiquidityProvisionType];
 
-	/**
-	 * Handler for changing token A or B. Resets the amount and sets active side.
-	 */
+			const nextActiveSide = prev.firstChangedSide || 
+				(prev.amountA ? "A" : prev.amountB ? "B" : null);
+
+			return {
+				...prev,
+				provisionType: "Balanced" as LiquidityProvisionType,
+				poolAddress: match[1],
+				provisionHistory: newHistory,
+				activeSide: nextActiveSide,
+			};
+		});
+	}, [simulationError, formData.provisionType]);
+
+	// Token change handler
 	const handleTokenChange = useCallback(
 		(side: "A" | "B") => (asset: AssetInfoV2 | null) => {
 			setFormData((prev) => ({
 				...prev,
 				[`token${side}`]: asset,
 				[`amount${side}`]: "",
-				// If Balanced, we set activeSide to this side
 				activeSide: prev.provisionType === "Balanced" ? side : prev.activeSide,
 			}));
 		},
 		[],
 	);
 
-	/**
-	 * Handler for changing amount A or B.
-	 * - If it's the first non-empty change overall, record firstChangedSide.
-	 * - If Balanced, update activeSide to this side so we only pass that side's input.
-	 */
+	// Amount change handler
 	const handleAmountChange = useCallback(
 		(side: "A" | "B") => (amount: string) => {
 			setFormData((prev) => {
-				let nextFirstChanged = prev.firstChangedSide;
-				if (!prev.firstChangedSide && amount) {
-					// This is the first time the user typed a non-empty amount on any side
-					nextFirstChanged = side;
-				}
-
-				let nextActiveSide = prev.activeSide;
-				if (prev.provisionType === "Balanced") {
-					// For balanced, we want to use whichever side user last changed
-					nextActiveSide = side;
-				}
+				const firstChange = !prev.firstChangedSide && amount ? side : prev.firstChangedSide;
+				const nextActiveSide = prev.provisionType === "Balanced" ? side : prev.activeSide;
 
 				return {
 					...prev,
 					[`amount${side}`]: amount,
-					firstChangedSide: nextFirstChanged,
+					firstChangedSide: firstChange,
 					activeSide: nextActiveSide,
 				};
 			});
@@ -341,11 +290,11 @@ export const useProvideLiquidity = () => {
 		[],
 	);
 
-	/**
-	 * The "provide" transaction. Validate first, then build the deposit TX messages for each side.
-	 */
+	// Provide liquidity handler
 	const handleProvide = useCallback(async () => {
 		setError("");
+
+		// Validate inputs
 		const validationErr = validateProvide(
 			formData.tokenA,
 			formData.tokenB,
@@ -358,16 +307,15 @@ export const useProvideLiquidity = () => {
 			setError(validationErr);
 			return;
 		}
+
 		if (!matchedRouter || !walletAddress) {
-			setError(
-				"No suitable router found or wallet not connected. Please check your setup.",
-			);
+			setError("No suitable router found or wallet not connected.");
 			return;
 		}
 
-		setLoadingTx(true);
 		try {
-			// Prepare deposit transactions
+			setLoadingTx(true);
+
 			const routerContract = DEX.v2_2.Router.create(matchedRouter.address);
 			const proxyTon = pTON.v2_1.create(matchedRouter.ptonMasterAddress);
 
@@ -375,34 +323,31 @@ export const useProvideLiquidity = () => {
 			const isTonB = formData.tokenB!.kind === "Ton";
 
 			const queryIdBase = Date.now();
+			const txParamsA = await buildTwoSideDepositTx(
+				routerContract,
+				isTonA,
+				formData.tokenA!,
+				formData.amountA,
+				formData.tokenB!,
+				proxyTon,
+				queryIdBase,
+				walletAddress,
+			);
+			const txParamsB = await buildTwoSideDepositTx(
+				routerContract,
+				isTonB,
+				formData.tokenB!,
+				formData.amountB,
+				formData.tokenA!,
+				proxyTon,
+				queryIdBase + 1,
+				walletAddress,
+			);
 
-			const txParamsArray = [
-				await buildTwoSideDepositTx(
-					routerContract,
-					isTonA,
-					formData.tokenA!,
-					formData.amountA,
-					formData.tokenB!,
-					proxyTon,
-					queryIdBase,
-					walletAddress,
-				),
-				await buildTwoSideDepositTx(
-					routerContract,
-					isTonB,
-					formData.tokenB!,
-					formData.amountB,
-					formData.tokenA!,
-					proxyTon,
-					queryIdBase + 1,
-					walletAddress,
-				),
-			];
-
-			const messages = txParamsArray.map((txParams) => ({
-				address: txParams.to.toString(),
-				amount: txParams.value.toString(),
-				payload: txParams.body?.toBoc().toString("base64"),
+			const messages = [txParamsA, txParamsB].map((tx) => ({
+				address: tx.to.toString(),
+				amount: tx.value.toString(),
+				payload: tx.body?.toBoc().toString("base64"),
 			}));
 
 			await tonConnectUI.sendTransaction({
@@ -421,21 +366,21 @@ export const useProvideLiquidity = () => {
 		matchedRouter,
 		walletAddress,
 		tonConnectUI,
-		setError,
-		setLoadingTx,
 	]);
 
 	return {
 		isWalletConnected,
 		allAssets,
 
-		// Data
+		// Input data
 		tokenA: formData.tokenA,
 		tokenB: formData.tokenB,
 		amountA: formData.amountA,
 		amountB: formData.amountB,
 		provisionType: formData.provisionType,
-		lpSimulation: lpSimulation,
+
+		// Simulation state
+		lpSimulation,
 		simulationError: simulationError?.message || "",
 		loadingSimulation,
 		loadingTx,
@@ -447,12 +392,10 @@ export const useProvideLiquidity = () => {
 		// Updaters
 		setProvisionType: (type: LiquidityProvisionType) =>
 			setFormData((prev) => {
-				// If we haven't included this type in history, add it
-				let nextHistory = prev.provisionHistory;
-				if (!nextHistory.includes(type)) {
-					nextHistory = [...nextHistory, type];
-				}
-				return { ...prev, provisionType: type, provisionHistory: nextHistory };
+				const newHistory = prev.provisionHistory.includes(type)
+					? prev.provisionHistory
+					: [...prev.provisionHistory, type];
+				return { ...prev, provisionType: type, provisionHistory: newHistory };
 			}),
 		handleTokenAChange: handleTokenChange("A"),
 		handleTokenBChange: handleTokenChange("B"),

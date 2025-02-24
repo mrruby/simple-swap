@@ -27,7 +27,14 @@ export interface UseSimulateLiquidityParams {
 }
 
 /**
- * Use this hook to simulate liquidity provision with debounced input values.
+ * Converts an amount to token units based on decimals
+ */
+const toTokenUnits = (amount: string | undefined, decimals: number): string | undefined => 
+	amount && floatToBigNumber(amount, decimals).toString();
+
+/**
+ * Hook to simulate liquidity provisioning with debounced inputs.
+ * Uses early returns and pure helper functions.
  */
 export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 	const {
@@ -43,25 +50,18 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 		activeSide,
 	} = params;
 
-	// Debounce amounts
+	// Debounce user inputs
 	const debouncedAmountA = useDebounce(amountA, 500);
 	const debouncedAmountB = useDebounce(amountB, 500);
-	// Debounce activeSide so that we don't thrash simulations
-	const debouncedActiveSide = useDebounce(activeSide, 500);
+	const debouncedSide = useDebounce(activeSide, 500);
 
-	/**
-	 * If we don't have enough input data to run the simulation,
-	 * we can disable the query or return early.
-	 */
+	// Determine if the simulation can run
 	const isEnabled = Boolean(
-		walletAddress &&
-			tokenA &&
-			tokenB &&
-			(provisionType === "Balanced"
-				? // Balanced requires at least one side
-					debouncedAmountA || debouncedAmountB
-				: // "Initial" or "Arbitrary" require both sides
-					debouncedAmountA && debouncedAmountB),
+		walletAddress && tokenA && tokenB && (
+			provisionType === "Balanced"
+				? debouncedAmountA || debouncedAmountB
+				: (debouncedAmountA && debouncedAmountB)
+		)
 	);
 
 	return useQuery<
@@ -79,7 +79,7 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 			debouncedAmountB,
 			provisionType,
 			poolAddress,
-			debouncedActiveSide,
+			debouncedSide,
 			decimalsA,
 			decimalsB,
 		],
@@ -88,94 +88,28 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 				return null;
 			}
 
-			// Prepare token units
-			let tokenAUnits: string | undefined;
-			let tokenBUnits: string | undefined;
+			// Convert amounts to token units based on decimals
+			const tokenAUnits = toTokenUnits(debouncedAmountA, decimalsA);
+			const tokenBUnits = toTokenUnits(debouncedAmountB, decimalsB);
 
-			if (provisionType === "Balanced") {
-				// We only pass the side indicated by activeSide
-				if (debouncedActiveSide === "A" && debouncedAmountA) {
-					tokenAUnits = floatToBigNumber(
-						debouncedAmountA,
-						decimalsA,
-					).toString();
-				} else if (debouncedActiveSide === "B" && debouncedAmountB) {
-					tokenBUnits = floatToBigNumber(
-						debouncedAmountB,
-						decimalsB,
-					).toString();
-				} else {
-					// If no side is set, fallback to whichever side is non-empty
-					if (debouncedAmountA) {
-						tokenAUnits = floatToBigNumber(
-							debouncedAmountA,
-							decimalsA,
-						).toString();
-					} else if (debouncedAmountB) {
-						tokenBUnits = floatToBigNumber(
-							debouncedAmountB,
-							decimalsB,
-						).toString();
-					}
-				}
+			// For Balanced, only pass the active side's units
+			const finalTokenAUnits = provisionType === "Balanced" && debouncedSide === "B"
+				? undefined
+				: tokenAUnits;
+			const finalTokenBUnits = provisionType === "Balanced" && debouncedSide === "A"
+				? undefined
+				: tokenBUnits;
 
-				// Balanced requires a poolAddress
-				if (!poolAddress) {
-					throw new Error(
-						"Balanced provision requires an existing poolAddress",
-					);
-				}
-
-				if (!tokenAUnits && !tokenBUnits) {
-					// No input side => no simulation
-					return null;
-				}
-
-				return simulateLiquidityProvision({
-					provisionType: "Balanced",
-					poolAddress,
-					walletAddress,
-					tokenA: tokenA!,
-					tokenB: tokenB!,
-					tokenAUnits,
-					tokenBUnits,
-					slippageTolerance: "0.001",
-				});
-			} else {
-				// "Initial" or "Arbitrary" require both amounts
-				if (!debouncedAmountA || !debouncedAmountB) {
-					return null;
-				}
-				tokenAUnits = floatToBigNumber(debouncedAmountA, decimalsA).toString();
-				tokenBUnits = floatToBigNumber(debouncedAmountB, decimalsB).toString();
-
-				if (provisionType === "Initial") {
-					return simulateLiquidityProvision({
-						provisionType: "Initial",
-						walletAddress,
-						tokenA: tokenA!,
-						tokenB: tokenB!,
-						tokenAUnits,
-						tokenBUnits,
-						slippageTolerance: "0.001",
-					});
-				} else {
-					// "Arbitrary"
-					if (!poolAddress) {
-						throw new Error("Arbitrary provision requires poolAddress");
-					}
-					return simulateLiquidityProvision({
-						provisionType: "Arbitrary",
-						poolAddress,
-						walletAddress,
-						tokenA: tokenA!,
-						tokenB: tokenB!,
-						tokenAUnits,
-						tokenBUnits,
-						slippageTolerance: "0.001",
-					});
-				}
-			}
+			return simulateLiquidityProvision({
+				walletAddress,
+				tokenA: tokenA!,
+				tokenB: tokenB!,
+				provisionType,
+				poolAddress,
+				tokenAUnits: finalTokenAUnits,
+				tokenBUnits: finalTokenBUnits,
+				slippageTolerance: "0.001",
+			});
 		},
 		enabled: isEnabled,
 		retry: false,
@@ -183,9 +117,8 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 }
 
 /**
- * Utility to update the "other" side of Balanced provisioning after simulation.
- * For Balanced, we read from the simulation whichever side is not activeSide
- * so the amounts reflect a balanced ratio.
+ * For Balanced, we auto-update the other side using data from simulation.
+ * Pure function that returns updated amounts based on simulation data.
  */
 export function getUpdatedBalancedAmounts(
 	provisionType: LiquidityProvisionType,
@@ -195,31 +128,30 @@ export function getUpdatedBalancedAmounts(
 	decimalsA: number,
 	decimalsB: number,
 	simulation?: LiquidityProvisionSimulation | null,
-) {
-	if (!simulation) {
+): { amountA: string; amountB: string } {
+	// Early return if no simulation or not Balanced
+	if (!simulation || provisionType !== "Balanced") {
 		return { amountA: currentA, amountB: currentB };
 	}
 
-	if (provisionType !== "Balanced") {
-		return { amountA: currentA, amountB: currentB };
-	}
+	const { tokenAUnits, tokenBUnits } = simulation;
 
-	// For Balanced, we read from the simulation whichever side is not activeSide
-	// so the amounts reflect a balanced ratio. We'll replace the other side only.
-	// If activeSide === "A", we override B with the simulated tokenBUnits.
-	// If activeSide === "B", we override A with the simulated tokenAUnits.
-	if (activeSide === "A" && simulation.tokenBUnits) {
+	// Update B amount if A is active and we have B units
+	if (activeSide === "A" && tokenBUnits) {
 		return {
 			amountA: currentA,
-			amountB: formatAmount(simulation.tokenBUnits, decimalsB),
+			amountB: formatAmount(tokenBUnits, decimalsB),
 		};
-	} else if (activeSide === "B" && simulation.tokenAUnits) {
+	}
+
+	// Update A amount if B is active and we have A units
+	if (activeSide === "B" && tokenAUnits) {
 		return {
-			amountA: formatAmount(simulation.tokenAUnits, decimalsA),
+			amountA: formatAmount(tokenAUnits, decimalsA),
 			amountB: currentB,
 		};
 	}
 
-	// If no side was determined, or there's no updated amounts, keep as-is
+	// Keep amounts as-is if no active side or missing data
 	return { amountA: currentA, amountB: currentB };
 }
