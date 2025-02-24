@@ -1,6 +1,6 @@
-import { NavLink, Route, Routes, Outlet } from "react-router";
-import { Swap } from "./components/Swap";
+import { NavLink, Outlet, Route, Routes } from "react-router";
 import { ProvideLiquidity } from "./components/ProvideLiquidity";
+import { Swap } from "./components/Swap";
 
 function Layout() {
 	return (
