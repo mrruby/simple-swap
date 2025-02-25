@@ -1,5 +1,13 @@
 import type { LiquidityProvisionType } from "@ston-fi/api";
+import type {
+	AssetInfoV2,
+	LiquidityProvisionSimulation,
+	RouterInfo,
+} from "@ston-fi/api";
+import { dexFactory } from "@ston-fi/sdk";
 import { stonApiClient } from "./clients";
+import { tonApiClient } from "./clients";
+import { floatToBigNumber } from "./utils";
 
 /** Types for liquidity provisioning simulation */
 export type SimulateLiquidityProvisionParams = {
@@ -19,7 +27,7 @@ export type SimulateLiquidityProvisionParams = {
  */
 export async function simulateLiquidityProvision(
 	params: SimulateLiquidityProvisionParams,
-) {
+): Promise<LiquidityProvisionSimulation> {
 	const {
 		provisionType,
 		walletAddress,
@@ -73,22 +81,69 @@ export async function simulateLiquidityProvision(
 		});
 	}
 
-	// 3) Arbitrary
-	if (provisionType === "Arbitrary") {
-		if (!poolAddress || !tokenAUnits || !tokenBUnits) {
-			throw new Error(
-				"Arbitrary provision requires pool address and both token amounts.",
-			);
-		}
-		return stonApiClient.simulateLiquidityProvision({
-			...baseParams,
-			provisionType: "Arbitrary",
-			poolAddress,
-			tokenAUnits,
-			tokenBUnits,
-		});
-	}
-
 	// Unknown
 	throw new Error(`Unknown provision type: ${provisionType}`);
+}
+
+/**
+ * Build transaction parameters for a single side deposit.
+ * We derive routerContract and proxyTon internally from routerInfo.
+ */
+interface BuildTwoSideDepositTxParams {
+	routerInfo: RouterInfo;
+	sideToken: AssetInfoV2;
+	sideAmount: string;
+	otherToken: AssetInfoV2;
+	queryId: number;
+	walletAddress: string;
+}
+
+export async function buildTwoSideDepositTx({
+	routerInfo,
+	sideToken,
+	sideAmount,
+	otherToken,
+	queryId,
+	walletAddress,
+}: BuildTwoSideDepositTxParams) {
+	const dexContracts = dexFactory(routerInfo);
+	const routerContract = tonApiClient.open(
+		dexContracts.Router.create(routerInfo.address),
+	);
+	const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress);
+
+	// Convert sideAmount to BigInt
+	const isTonSide = sideToken.kind === "Ton";
+
+	// For TON we use floatToBigNumber as well, but we must treat it as 9 decimals or just parse it with toNano
+	// For simplicity, assume decimals=9 if Ton. This approach is consistent with 'toNano' usage.
+	const decimals =
+		sideToken.kind === "Ton" ? 9 : (sideToken.meta?.decimals ?? 9);
+	const sendAmount = floatToBigNumber(sideAmount, decimals);
+
+	if (isTonSide) {
+		return routerContract.getProvideLiquidityTonTxParams({
+			userWalletAddress: walletAddress,
+			proxyTon,
+			sendAmount,
+			otherTokenAddress: otherToken.contractAddress,
+			minLpOut: "1",
+			queryId,
+		});
+	} else {
+		// If the other token is TON, we pass the pTon address as "otherTokenAddress"
+		const otherIsTon = otherToken.kind === "Ton";
+		const otherAddress = otherIsTon
+			? proxyTon.address.toString()
+			: otherToken.contractAddress;
+
+		return routerContract.getProvideLiquidityJettonTxParams({
+			userWalletAddress: walletAddress,
+			sendTokenAddress: sideToken.contractAddress,
+			sendAmount: sendAmount.toString(),
+			otherTokenAddress: otherAddress,
+			minLpOut: "1",
+			queryId,
+		});
+	}
 }

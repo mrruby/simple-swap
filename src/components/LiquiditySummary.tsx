@@ -1,20 +1,20 @@
-import type { LiquidityProvisionSimulation } from "@ston-fi/api";
+import type { AssetInfoV2, LiquidityProvisionSimulation } from "@ston-fi/api";
 import { formatAmount } from "../lib/utils";
 
 type LiquiditySummaryProps = {
 	loading: boolean;
 	error: string;
 	simulation: LiquidityProvisionSimulation | null;
-	tokenADecimals?: number;
-	tokenBDecimals?: number;
+	tokenA?: AssetInfoV2;
+	tokenB?: AssetInfoV2;
 };
 
 export const LiquiditySummary = ({
 	loading,
 	error,
 	simulation,
-	tokenADecimals = 9,
-	tokenBDecimals = 9,
+	tokenA,
+	tokenB,
 }: LiquiditySummaryProps) => {
 	if (loading) {
 		return (
@@ -57,6 +57,9 @@ export const LiquiditySummary = ({
 		return null;
 	}
 
+	const decimalsA = tokenA?.meta?.decimals ?? 9;
+	const decimalsB = tokenB?.meta?.decimals ?? 9;
+
 	// For convenience, parse relevant simulation fields
 	const {
 		estimatedLpUnits,
@@ -65,8 +68,8 @@ export const LiquiditySummary = ({
 		minTokenBUnits,
 		tokenAUnits,
 		tokenBUnits,
-		tokenA,
-		tokenB,
+		tokenA: tokenAAddress,
+		tokenB: tokenBAddress,
 		lpAccountAddress,
 		poolAddress,
 		provisionType,
@@ -84,15 +87,19 @@ export const LiquiditySummary = ({
 			<div className="flex justify-between">
 				<span className="text-gray-600 font-medium">Token A Amount</span>
 				<span className="text-gray-900 font-semibold">
-					{formatAmount(tokenAUnits, tokenADecimals)}{" "}
-					<small className="text-gray-500">{tokenA.slice(0, 6)}...</small>
+					{formatAmount(tokenAUnits, decimalsA)}{" "}
+					<small className="text-gray-500">
+						{tokenAAddress.slice(0, 6)}...
+					</small>
 				</span>
 			</div>
 			<div className="flex justify-between">
 				<span className="text-gray-600 font-medium">Token B Amount</span>
 				<span className="text-gray-900 font-semibold">
-					{formatAmount(tokenBUnits, tokenBDecimals)}{" "}
-					<small className="text-gray-500">{tokenB.slice(0, 6)}...</small>
+					{formatAmount(tokenBUnits, decimalsB)}{" "}
+					<small className="text-gray-500">
+						{tokenBAddress.slice(0, 6)}...
+					</small>
 				</span>
 			</div>
 
@@ -116,13 +123,13 @@ export const LiquiditySummary = ({
 			<div className="flex justify-between">
 				<span className="text-gray-600 font-medium">Min Token A deposit</span>
 				<span className="text-gray-900 font-semibold">
-					{formatAmount(minTokenAUnits, tokenADecimals)}
+					{formatAmount(minTokenAUnits, decimalsA)}
 				</span>
 			</div>
 			<div className="flex justify-between">
 				<span className="text-gray-600 font-medium">Min Token B deposit</span>
 				<span className="text-gray-900 font-semibold">
-					{formatAmount(minTokenBUnits, tokenBDecimals)}
+					{formatAmount(minTokenBUnits, decimalsB)}
 				</span>
 			</div>
 

@@ -1,10 +1,11 @@
 import type {
+	AssetInfoV2,
 	LiquidityProvisionSimulation,
 	LiquidityProvisionType,
 } from "@ston-fi/api";
 import { useQuery } from "@tanstack/react-query";
 import { simulateLiquidityProvision } from "../lib/liquidity";
-import { floatToBigNumber, formatAmount } from "../lib/utils";
+import { formatAmount, toTokenUnits } from "../lib/utils";
 import { useDebounce } from "./useDebounce";
 
 /**
@@ -12,25 +13,20 @@ import { useDebounce } from "./useDebounce";
  */
 export interface UseSimulateLiquidityParams {
 	walletAddress?: string;
-	tokenA?: string;
-	tokenB?: string;
+	/**
+	 * Full token objects so we can access addresses and decimals.
+	 */
+	tokenA?: AssetInfoV2;
+	tokenB?: AssetInfoV2;
 	amountA?: string;
 	amountB?: string;
 	provisionType: LiquidityProvisionType;
 	poolAddress?: string;
-	decimalsA: number;
-	decimalsB: number;
 	/**
 	 * For Balanced, we only pass one side's amount. This is determined by activeSide.
 	 */
 	activeSide?: "A" | "B" | null;
 }
-
-/**
- * Converts an amount to token units based on decimals
- */
-const toTokenUnits = (amount: string | undefined, decimals: number): string | undefined => 
-	amount && floatToBigNumber(amount, decimals).toString();
 
 /**
  * Hook to simulate liquidity provisioning with debounced inputs.
@@ -45,8 +41,6 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 		amountB,
 		provisionType,
 		poolAddress,
-		decimalsA,
-		decimalsB,
 		activeSide,
 	} = params;
 
@@ -57,11 +51,12 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 
 	// Determine if the simulation can run
 	const isEnabled = Boolean(
-		walletAddress && tokenA && tokenB && (
-			provisionType === "Balanced"
+		walletAddress &&
+			tokenA &&
+			tokenB &&
+			(provisionType === "Balanced"
 				? debouncedAmountA || debouncedAmountB
-				: (debouncedAmountA && debouncedAmountB)
-		)
+				: debouncedAmountA && debouncedAmountB),
 	);
 
 	return useQuery<
@@ -73,37 +68,45 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 		queryKey: [
 			"simulateLiquidity",
 			walletAddress,
-			tokenA,
-			tokenB,
+			tokenA?.contractAddress,
+			tokenB?.contractAddress,
 			debouncedAmountA,
 			debouncedAmountB,
 			provisionType,
 			poolAddress,
 			debouncedSide,
-			decimalsA,
-			decimalsB,
 		],
 		queryFn: async () => {
 			if (!isEnabled) {
 				return null;
 			}
 
+			// Get decimals from token objects
+			const decimalsA = tokenA?.meta?.decimals ?? 9;
+			const decimalsB = tokenB?.meta?.decimals ?? 9;
+
 			// Convert amounts to token units based on decimals
-			const tokenAUnits = toTokenUnits(debouncedAmountA, decimalsA);
-			const tokenBUnits = toTokenUnits(debouncedAmountB, decimalsB);
+			const tokenAUnits = debouncedAmountA
+				? toTokenUnits(debouncedAmountA, decimalsA)
+				: undefined;
+			const tokenBUnits = debouncedAmountB
+				? toTokenUnits(debouncedAmountB, decimalsB)
+				: undefined;
 
 			// For Balanced, only pass the active side's units
-			const finalTokenAUnits = provisionType === "Balanced" && debouncedSide === "B"
-				? undefined
-				: tokenAUnits;
-			const finalTokenBUnits = provisionType === "Balanced" && debouncedSide === "A"
-				? undefined
-				: tokenBUnits;
+			const finalTokenAUnits =
+				provisionType === "Balanced" && debouncedSide === "B"
+					? undefined
+					: tokenAUnits;
+			const finalTokenBUnits =
+				provisionType === "Balanced" && debouncedSide === "A"
+					? undefined
+					: tokenBUnits;
 
 			return simulateLiquidityProvision({
 				walletAddress,
-				tokenA: tokenA!,
-				tokenB: tokenB!,
+				tokenA: tokenA!.contractAddress,
+				tokenB: tokenB!.contractAddress,
 				provisionType,
 				poolAddress,
 				tokenAUnits: finalTokenAUnits,
@@ -125,16 +128,18 @@ export function getUpdatedBalancedAmounts(
 	activeSide: "A" | "B" | null,
 	currentA: string,
 	currentB: string,
-	decimalsA: number,
-	decimalsB: number,
+	tokenA?: AssetInfoV2,
+	tokenB?: AssetInfoV2,
 	simulation?: LiquidityProvisionSimulation | null,
 ): { amountA: string; amountB: string } {
 	// Early return if no simulation or not Balanced
-	if (!simulation || provisionType !== "Balanced") {
+	if (!simulation || provisionType !== "Balanced" || !tokenA || !tokenB) {
 		return { amountA: currentA, amountB: currentB };
 	}
 
 	const { tokenAUnits, tokenBUnits } = simulation;
+	const decimalsA = tokenA.meta?.decimals ?? 9;
+	const decimalsB = tokenB.meta?.decimals ?? 9;
 
 	// Update B amount if A is active and we have B units
 	if (activeSide === "A" && tokenBUnits) {

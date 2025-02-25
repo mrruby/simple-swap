@@ -110,8 +110,8 @@ export function ProvideLiquidity() {
 					loading={loadingSimulation}
 					error={simulationError}
 					simulation={lpSimulation ?? null}
-					tokenADecimals={tokenA?.meta?.decimals}
-					tokenBDecimals={tokenB?.meta?.decimals}
+					tokenA={tokenA || undefined}
+					tokenB={tokenB || undefined}
 				/>
 			</div>
 

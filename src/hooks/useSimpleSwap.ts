@@ -3,7 +3,7 @@ import { CHAIN, useTonAddress, useTonConnectUI } from "@tonconnect/ui-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { buildSwapTransaction, fetchAssets, simulateSwap } from "../lib/swap";
-import { formatAmount } from "../lib/utils";
+import { formatAmount, generateRandomQueryId } from "../lib/utils";
 import { useSwapStatusNotifications } from "./useSwapStatusNotifications";
 import { ITransactionDetails } from "./useSwapStatusQuery";
 
@@ -169,7 +169,7 @@ export function useSimpleSwap() {
 		updateState({ loadingTx: true });
 
 		try {
-			const queryId = Date.now();
+			const queryId = generateRandomQueryId();
 			const messages = await buildSwapTransaction(
 				simulationResult,
 				walletAddress,
