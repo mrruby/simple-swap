@@ -5,8 +5,7 @@ import type {
 	RouterInfo,
 } from "@ston-fi/api";
 import { dexFactory } from "@ston-fi/sdk";
-import { stonApiClient } from "./clients";
-import { tonApiClient } from "./clients";
+import { stonApiClient, tonApiClient } from "./clients";
 import { floatToBigNumber } from "./utils";
 
 /** Types for liquidity provisioning simulation */
@@ -44,7 +43,7 @@ export async function simulateLiquidityProvision(
 		tokenA,
 		tokenB,
 		slippageTolerance,
-		...(walletAddress && { walletAddress }),
+		walletAddress,
 	};
 
 	// 1) Initial
@@ -65,13 +64,12 @@ export async function simulateLiquidityProvision(
 		if (!poolAddress) {
 			throw new Error("Balanced provision requires pool address.");
 		}
-		if (!tokenAUnits && !tokenBUnits) {
-			throw new Error("Balanced provision requires at least one token amount.");
-		}
-		// Balanced can take either A or B units, not both
+		// Balanced simulation requires one token amount
+		// If both are provided, we prioritize tokenA
+		// If neither is provided, default to 1 unit of tokenB
 		const selectedUnits = tokenAUnits
 			? { tokenAUnits }
-			: { tokenBUnits: tokenBUnits! };
+			: { tokenBUnits: tokenBUnits || "1" };
 
 		return stonApiClient.simulateLiquidityProvision({
 			...baseParams,
@@ -94,8 +92,8 @@ interface BuildTwoSideDepositTxParams {
 	sideToken: AssetInfoV2;
 	sideAmount: string;
 	otherToken: AssetInfoV2;
-	queryId: number;
 	walletAddress: string;
+	minLpOut: string;
 }
 
 export async function buildTwoSideDepositTx({
@@ -103,8 +101,8 @@ export async function buildTwoSideDepositTx({
 	sideToken,
 	sideAmount,
 	otherToken,
-	queryId,
 	walletAddress,
+	minLpOut,
 }: BuildTwoSideDepositTxParams) {
 	const dexContracts = dexFactory(routerInfo);
 	const routerContract = tonApiClient.open(
@@ -112,14 +110,10 @@ export async function buildTwoSideDepositTx({
 	);
 	const proxyTon = dexContracts.pTON.create(routerInfo.ptonMasterAddress);
 
-	// Convert sideAmount to BigInt
-	const isTonSide = sideToken.kind === "Ton";
+	// Convert sideAmount to BigInt using optional decimals
+	const sendAmount = floatToBigNumber(sideAmount, sideToken.meta?.decimals);
 
-	// For TON we use floatToBigNumber as well, but we must treat it as 9 decimals or just parse it with toNano
-	// For simplicity, assume decimals=9 if Ton. This approach is consistent with 'toNano' usage.
-	const decimals =
-		sideToken.kind === "Ton" ? 9 : (sideToken.meta?.decimals ?? 9);
-	const sendAmount = floatToBigNumber(sideAmount, decimals);
+	const isTonSide = sideToken.kind === "Ton";
 
 	if (isTonSide) {
 		return routerContract.getProvideLiquidityTonTxParams({
@@ -127,8 +121,7 @@ export async function buildTwoSideDepositTx({
 			proxyTon,
 			sendAmount,
 			otherTokenAddress: otherToken.contractAddress,
-			minLpOut: "1",
-			queryId,
+			minLpOut,
 		});
 	} else {
 		// If the other token is TON, we pass the pTon address as "otherTokenAddress"
@@ -142,8 +135,7 @@ export async function buildTwoSideDepositTx({
 			sendTokenAddress: sideToken.contractAddress,
 			sendAmount: sendAmount.toString(),
 			otherTokenAddress: otherAddress,
-			minLpOut: "1",
-			queryId,
+			minLpOut,
 		});
 	}
 }

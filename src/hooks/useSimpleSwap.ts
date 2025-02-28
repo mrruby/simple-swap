@@ -89,7 +89,6 @@ export function useSimpleSwap() {
 
 			try {
 				const result = await simulateSwap({
-					walletAddress,
 					offerAssetAddress: offerAsset.contractAddress,
 					askAssetAddress: askAsset.contractAddress,
 					offerAmount: offerAmount || undefined,

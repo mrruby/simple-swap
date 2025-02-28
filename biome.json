@@ -3,7 +3,7 @@
 	"vcs": { "enabled": false, "clientKind": "git", "useIgnoreFile": false },
 	"files": {
 		"ignoreUnknown": false,
-		"ignore": ["./tsconfig.app.json", "./tsconfig.node.json"]
+		"ignore": ["./tsconfig.app.json", "./tsconfig.node.json", "./dist"]
 	},
 	"formatter": { "enabled": true, "indentStyle": "tab" },
 	"organizeImports": { "enabled": true },

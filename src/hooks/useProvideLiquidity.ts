@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { stonApiClient } from "../lib/clients";
 import { buildTwoSideDepositTx } from "../lib/liquidity";
 import { fetchAssets } from "../lib/swap";
-import { generateRandomQueryId, parseAmountValue } from "../lib/utils";
+import { parseAmountValue } from "../lib/utils";
 import {
 	getUpdatedBalancedAmounts,
 	useSimulateLiquidity,
@@ -24,15 +24,12 @@ const isApiError = (error: unknown): error is { data?: string } =>
 /**
  * Validate liquidity provision inputs
  *
- * - "Initial": Both sides must be > 0
- * - "Balanced": Exactly one side must be > 0 (the other side must be 0)
  */
 const validateProvide = (
 	tokenA: AssetInfoV2 | null,
 	tokenB: AssetInfoV2 | null,
 	amountA: string,
 	amountB: string,
-	provisionType: LiquidityProvisionType,
 	isWalletConnected: boolean,
 ): string | null => {
 	if (!tokenA || !tokenB) {
@@ -42,29 +39,22 @@ const validateProvide = (
 	if (!isWalletConnected) {
 		return "Please connect your wallet.";
 	}
-
 	// Convert user inputs to numeric
 	const valA = parseAmountValue(amountA);
 	const valB = parseAmountValue(amountB);
 
-	if (provisionType === "Initial") {
-		// Creating a new pool requires strictly > 0 on both sides
-		if (valA <= 0 || valB <= 0) {
-			return "For 'Initial' provisioning, both amounts must be > 0.";
-		}
-		return null;
+	// Check if both tokens have amounts
+	const hasBothAmounts = valA > 0 && valB > 0;
+
+	if (!isWalletConnected) {
+		return "Please connect your wallet.";
 	}
 
-	if (provisionType === "Balanced") {
-		// Balanced requires exactly one side to be > 0
-		if ((valA > 0 && valB > 0) || (valA <= 0 && valB <= 0)) {
-			return "For 'Balanced' provisioning, exactly one token amount must be > 0. The other must be 0.";
-		}
-		return null;
+	if (!hasBothAmounts) {
+		return "Both token amounts must be greater than 0.";
 	}
 
-	// Default case for unknown provision types
-	return `Unknown provisioning type: ${provisionType}`;
+	return null;
 };
 
 /**
@@ -191,8 +181,17 @@ export const useProvideLiquidity = () => {
 		const errorMsg = simulationError.data;
 		if (typeof errorMsg !== "string") return;
 
-		const match = errorMsg.match(/already exists:\s*(\S+)/);
-		if (!match?.[1]) return;
+		// Support both regex patterns for pool already exists errors
+		const standardMatch = errorMsg.match(/already exists:\s*(\S+)/);
+		const alternateMatch = errorMsg.match(
+			/already exists for selected type of router: \[(.*?)\]/,
+		);
+
+		// Extract pool address from either match pattern
+		const poolAddress =
+			standardMatch?.[1] ||
+			(alternateMatch ? alternateMatch[1].split(",")[0].trim() : null);
+		if (!poolAddress) return;
 
 		setFormData((prev) => {
 			const newHistory = prev.provisionHistory.includes("Balanced")
@@ -206,7 +205,7 @@ export const useProvideLiquidity = () => {
 			return {
 				...prev,
 				provisionType: "Balanced" as LiquidityProvisionType,
-				poolAddress: match[1],
+				poolAddress,
 				provisionHistory: newHistory,
 				activeSide: nextActiveSide,
 			};
@@ -214,38 +213,55 @@ export const useProvideLiquidity = () => {
 	}, [simulationError, formData.provisionType]);
 
 	// Token change handler
-	const handleTokenChange = useCallback(
+	const handleTokenChange =
 		(side: "A" | "B") => (asset: AssetInfoV2 | null) => {
-			setFormData((prev) => ({
-				...prev,
-				["token" + side]: asset,
-				["amount" + side]: "",
-				activeSide: prev.provisionType === "Balanced" ? side : prev.activeSide,
-			}));
-		},
-		[],
-	);
+			setFormData((prev) => {
+				const oldAsset = side === "A" ? prev.tokenA : prev.tokenB;
+				const oldAddress = oldAsset?.contractAddress;
+				const newAddress = asset?.contractAddress;
+
+				let newState = {
+					...prev,
+					...(side === "A"
+						? { tokenA: asset, amountA: "" }
+						: { tokenB: asset, amountB: "" }),
+				};
+
+				// If the user is actually switching token (different from old one),
+				// reset form to "Initial" and clear amounts so no unwanted simulation occurs.
+				if (oldAddress && newAddress && oldAddress !== newAddress) {
+					newState = {
+						...newState,
+						provisionType: "Initial",
+						activeSide: null,
+						firstChangedSide: null,
+						amountA: "",
+						amountB: "",
+						poolAddress: undefined,
+						provisionHistory: [],
+					};
+				}
+
+				return newState;
+			});
+		};
 
 	// Amount change handler
-	const handleAmountChange = useCallback(
-		(side: "A" | "B") => (amount: string) => {
-			setFormData((prev) => {
-				const firstChange =
-					!prev.firstChangedSide && amount ? side : prev.firstChangedSide;
-				const nextActiveSide =
-					prev.provisionType === "Balanced" ? side : prev.activeSide;
+	const handleAmountChange = (side: "A" | "B") => (amount: string) => {
+		setFormData((prev) => {
+			const firstChange =
+				!prev.firstChangedSide && amount ? side : prev.firstChangedSide;
+			const nextActiveSide =
+				prev.provisionType === "Balanced" ? side : prev.activeSide;
 
-				return {
-					...prev,
-					["amount" + side]: amount,
-					firstChangedSide: firstChange,
-					activeSide: nextActiveSide,
-				};
-			});
-		},
-		[],
-	);
-
+			return {
+				...prev,
+				["amount" + side]: amount,
+				firstChangedSide: firstChange,
+				activeSide: nextActiveSide,
+			};
+		});
+	};
 	// Provide liquidity handler
 	const handleProvide = useCallback(async () => {
 		setError("");
@@ -256,7 +272,6 @@ export const useProvideLiquidity = () => {
 			formData.tokenB,
 			formData.amountA,
 			formData.amountB,
-			formData.provisionType,
 			isWalletConnected,
 		);
 		if (validationErr) {
@@ -269,19 +284,27 @@ export const useProvideLiquidity = () => {
 			return;
 		}
 
+		// We need minLpUnits from the simulation to respect slippage.
+		if (!lpSimulation?.minLpUnits) {
+			setError(
+				"Unable to retrieve simulation data or minLpUnits. Please try again.",
+			);
+			return;
+		}
+
 		try {
 			setLoadingTx(true);
 
-			const queryIdA = generateRandomQueryId();
-			const queryIdB = generateRandomQueryId();
+			// Use the simulation's minLpUnits for both deposit transactions
+			const minLpOut = lpSimulation.minLpUnits;
 
 			const txParamsA = await buildTwoSideDepositTx({
 				routerInfo: matchedRouter,
 				sideToken: formData.tokenA!,
 				sideAmount: formData.amountA,
 				otherToken: formData.tokenB!,
-				queryId: queryIdA,
 				walletAddress,
+				minLpOut,
 			});
 
 			const txParamsB = await buildTwoSideDepositTx({
@@ -289,8 +312,8 @@ export const useProvideLiquidity = () => {
 				sideToken: formData.tokenB!,
 				sideAmount: formData.amountB,
 				otherToken: formData.tokenA!,
-				queryId: queryIdB,
 				walletAddress,
+				minLpOut,
 			});
 
 			const messages = [txParamsA, txParamsB].map((tx) => ({
@@ -309,7 +332,14 @@ export const useProvideLiquidity = () => {
 		} finally {
 			setLoadingTx(false);
 		}
-	}, [formData, isWalletConnected, matchedRouter, walletAddress, tonConnectUI]);
+	}, [
+		formData,
+		isWalletConnected,
+		matchedRouter,
+		walletAddress,
+		tonConnectUI,
+		lpSimulation,
+	]);
 
 	return {
 		isWalletConnected,

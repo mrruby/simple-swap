@@ -1,4 +1,4 @@
-export function floatToBigNumber(value: string, decimals: number) {
+export function floatToBigNumber(value: string, decimals = 9) {
 	let [integer = "0", fraction = "0"] = value.split(".");
 
 	const negative = integer.startsWith("-");

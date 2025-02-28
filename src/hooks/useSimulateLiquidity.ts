@@ -45,18 +45,17 @@ export function useSimulateLiquidity(params: UseSimulateLiquidityParams) {
 	} = params;
 
 	// Debounce user inputs
-	const debouncedAmountA = useDebounce(amountA, 500);
-	const debouncedAmountB = useDebounce(amountB, 500);
-	const debouncedSide = useDebounce(activeSide, 500);
+	const debouncedAmountA = useDebounce(amountA);
+	const debouncedAmountB = useDebounce(amountB);
+	const debouncedSide = useDebounce(activeSide);
 
 	// Determine if the simulation can run
 	const isEnabled = Boolean(
 		walletAddress &&
-			tokenA &&
-			tokenB &&
-			(provisionType === "Balanced"
-				? debouncedAmountA || debouncedAmountB
-				: debouncedAmountA && debouncedAmountB),
+			tokenA?.contractAddress &&
+			tokenB?.contractAddress &&
+			debouncedAmountA &&
+			debouncedAmountB,
 	);
 
 	return useQuery<
