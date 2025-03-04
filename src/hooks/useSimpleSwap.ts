@@ -1,5 +1,5 @@
 import type { AssetInfoV2, SwapSimulation } from "@ston-fi/api";
-import { useTonAddress, useTonConnectUI } from "@tonconnect/ui-react";
+import { CHAIN, useTonAddress, useTonConnectUI } from "@tonconnect/ui-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { buildSwapTransaction, fetchAssets, simulateSwap } from "../lib/swap";
@@ -34,6 +34,11 @@ const initialState: SwapState = {
 export function useSimpleSwap() {
 	const walletAddress = useTonAddress();
 	const [tonConnectUI] = useTonConnectUI();
+
+	// Check if the user is on testnet
+	const isTestnet = Boolean(
+		tonConnectUI?.wallet?.account?.chain !== CHAIN.MAINNET
+	);
 
 	// Local swap state
 	const [state, setState] = useState<SwapState>(initialState);
@@ -234,6 +239,7 @@ export function useSimpleSwap() {
 
 	return {
 		isWalletConnected: !!walletAddress,
+		isTestnet,
 		state,
 		handleOfferAssetChange,
 		handleAskAssetChange,

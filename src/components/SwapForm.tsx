@@ -13,6 +13,7 @@ type SwapFormProps = {
 	loadingSimulation: boolean;
 	loadingTx: boolean;
 	isWalletConnected: boolean;
+	isTestnet: boolean;
 	onOfferAssetChange: (asset: AssetInfoV2 | null) => void;
 	onAskAssetChange: (asset: AssetInfoV2 | null) => void;
 	onOfferAmountChange: (amount: string) => void;
@@ -31,6 +32,7 @@ export const SwapForm = ({
 	loadingSimulation,
 	loadingTx,
 	isWalletConnected,
+	isTestnet,
 	onOfferAssetChange,
 	onAskAssetChange,
 	onOfferAmountChange,
@@ -67,9 +69,20 @@ export const SwapForm = ({
 				askAssetDecimals={askAsset?.meta?.decimals}
 			/>
 
+			{isTestnet && (
+				<div className="p-4 text-red-600 text-sm border border-red-200 rounded-lg">
+					Testnet is not supported. Please switch to mainnet to proceed.
+				</div>
+			)}
+
 			<button
 				onClick={onSwap}
-				disabled={!simulationResult || loadingTx || !isWalletConnected}
+				disabled={
+					!simulationResult ||
+					loadingTx ||
+					!isWalletConnected ||
+					isTestnet
+				}
 				className="w-full p-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
 			>
 				{loadingTx ? "Swapping..." : "Swap"}
