@@ -6,6 +6,7 @@ export const Swap = () => {
 	// Extract all swap state and handlers from our custom hook
 	const {
 		isWalletConnected,
+		isTestnet,
 		state,
 		handleOfferAssetChange,
 		handleAskAssetChange,
@@ -40,6 +41,7 @@ export const Swap = () => {
 				loadingSimulation={loadingSimulation}
 				loadingTx={loadingTx}
 				isWalletConnected={isWalletConnected}
+				isTestnet={isTestnet}
 				onOfferAssetChange={handleOfferAssetChange}
 				onAskAssetChange={handleAskAssetChange}
 				onOfferAmountChange={handleOfferAmountChange}
