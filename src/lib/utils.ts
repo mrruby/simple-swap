@@ -1,4 +1,4 @@
-export function floatToBigNumber(value: string, decimals: number) {
+export function floatToBigNumber(value: string, decimals = 9) {
 	let [integer = "0", fraction = "0"] = value.split(".");
 
 	const negative = integer.startsWith("-");
@@ -52,4 +52,39 @@ export function formatAmount(
 	} catch {
 		return amount;
 	}
+}
+
+/**
+ * Overloaded function to convert a string amount to token units
+ * with proper TS types for string or undefined.
+ */
+export function toTokenUnits(amount: string, decimals: number): string;
+export function toTokenUnits(amount: undefined, decimals: number): undefined;
+export function toTokenUnits(
+	amount: string | undefined,
+	decimals: number,
+): string | undefined {
+	if (amount === undefined) return undefined;
+	return floatToBigNumber(amount, decimals).toString();
+}
+
+/**
+ * Parse string to float, ensuring NaN -> 0
+ */
+export function parseAmountValue(amount: string): number {
+	const value = parseFloat(amount);
+	return Number.isNaN(value) ? 0 : value;
+}
+
+/**
+ * Generate a random 53-bit integer.
+ * (In JavaScript, we reliably handle up to 53 bits for integer precision.)
+ */
+export function generateRandomQueryId(): number {
+	const arr = new Uint32Array(2);
+	crypto.getRandomValues(arr);
+	// Combine to up to 64 bits, then mask to 53 bits
+	const combined = (BigInt(arr[0]) << 32n) | BigInt(arr[1]);
+	const mask53 = (1n << 53n) - 1n;
+	return Number(combined & mask53);
 }

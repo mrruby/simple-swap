@@ -5,7 +5,6 @@ import { stonApiClient, tonApiClient } from "./clients";
 import { floatToBigNumber } from "./utils";
 
 type SimulateSwapParams = {
-	walletAddress?: string;
 	offerAssetAddress: string;
 	askAssetAddress: string;
 	offerAmount?: string;
@@ -61,8 +60,8 @@ export const simulateSwap = async ({
 	slippageTolerancePercent = 1,
 	referralAddress,
 	referralValue,
-	decimalsOffer = 9,
-	decimalsAsk = 9,
+	decimalsOffer,
+	decimalsAsk,
 }: SimulateSwapParams) => {
 	if (!offerAssetAddress || !askAssetAddress) {
 		throw new Error("Missing asset addresses");
